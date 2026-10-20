@@ -1,0 +1,6 @@
+#pica-distribution-settings .pica-distribution-section{padding:8px 0 12px}
+#pica-distribution-settings .pica-distribution-section+.pica-distribution-section{border-top:1px solid var(--SmartThemeBorderColor)}
+#pica-distribution-settings p{margin:8px 0;font-size:calc(var(--mainFontSize,16px)*.85);opacity:.8;overflow-wrap:anywhere}
+#pica-distribution-settings .pica-distribution-actions{display:flex;flex-wrap:wrap;gap:5px}
+#pica-distribution-settings .menu_button{width:auto;margin:0;white-space:normal}
+#pica-distribution-settings [role="button"]:focus-visible{outline:2px solid var(--SmartThemeQuoteColor);outline-offset:2px}

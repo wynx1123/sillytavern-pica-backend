@@ -1,0 +1,14 @@
+{
+  "name": "pica-tavern-server-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ssrf8/sillytavern-pica-backend.git"
+  }
+}

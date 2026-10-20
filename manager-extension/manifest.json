@@ -1,0 +1,12 @@
+{
+  "display_name":"哔咔后端 · 前端管理",
+  "loading_order":100,
+  "js":"index.js",
+  "css":"style.css",
+  "author":"ssrf",
+  "version":"1.0.0",
+  "homePage":"https://github.com/ssrf8/sillytavern-pica-backend",
+  "minimum_client_version":"1.18.0",
+  "auto_update":false,
+  "hooks":{"activate":"init","clean":"cleanup","disable":"cleanup"}
+}

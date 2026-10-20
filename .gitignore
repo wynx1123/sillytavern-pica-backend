@@ -1,0 +1,11 @@
+cache/
+network.local.json
+native-routes.local.json*
+.env
+.env.*
+env
+.private/
+node_modules/
+*.log
+*.pem
+*.key
