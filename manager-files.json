@@ -1,19 +1,21 @@
 {
   "id": "pica-relay-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "files": {
-    "manifest.json": "aa28bff9fc11d0d905ce0e1405a00c6eb46d8386769b6d570748ee6a5af7f0d7",
-    "index.js": "cd17acc795141f1aa58750d58349af6f712b126490efc957c07aec61829de68e",
-    "style.css": "80b52b669f180dad7e8ea65b43aaecb2b700c0c92f41ea40d6ba5dfb96749841",
+    "manifest.json": "f0b25804f2f57844daea15a44c99c1d46b8cedec9f0b8a91e484ae3dca1dbced",
+    "index.js": "b718a0637d46773e8779dd9daf6baece848394c136fde7d677495176ff2ed072",
+    "style.css": "e5e940462aa35c9b292e7b519c8a4f207a26ddc6cbab8cc7119d88bb52f68625",
     "security.js": "11d5ef1078301e970eec19474b74a84e0d444534a426f97c8cf53c147614639c",
     "installer.mjs": "481c559b6a1908e01c2ff256cc0776ee831cb4acd933fd40515aeb5f63a74e2f"
   },
   "previous": {
     "manifest.json": [
-      "4c03507468b21dc3c2d46950bf5c7d03a909f27c3e12b1af405aaef989e77503"
+      "4c03507468b21dc3c2d46950bf5c7d03a909f27c3e12b1af405aaef989e77503",
+      "aa28bff9fc11d0d905ce0e1405a00c6eb46d8386769b6d570748ee6a5af7f0d7"
     ],
     "index.js": [
-      "85b60f566436b31a24fe9c36424315f93981a47b0c9ae3619ab23ca4a7b3472b"
+      "85b60f566436b31a24fe9c36424315f93981a47b0c9ae3619ab23ca4a7b3472b",
+      "cd17acc795141f1aa58750d58349af6f712b126490efc957c07aec61829de68e"
     ],
     "style.css": [
       "80b52b669f180dad7e8ea65b43aaecb2b700c0c92f41ea40d6ba5dfb96749841"

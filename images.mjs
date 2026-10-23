@@ -33,9 +33,16 @@ export function imageTarget(request) {
   return 'https://'+match[1]+'/static/'+match[2];
 }
 
-export async function forwardImage(request,{fetchImpl=globalThis.fetch,timeoutMs=30000,cors=true}={}) {
+export async function forwardImage(request,{fetchImpl=globalThis.fetch,timeoutMs=30000,cors=true,cache=null}={}) {
   const target=imageTarget(request),fail=(status,error)=>reply(status,{error},{cors});
   if(!target)return fail(404,'image_not_allowed');
+  const cacheKey='img:'+target;
+  const cachedHeaders=(type,state)=>new Headers({...(cors?CORS:{}),'Content-Type':type,
+    'Cache-Control':(cors?'public':'private')+', max-age=86400','X-Content-Type-Options':'nosniff',
+    'Cross-Origin-Resource-Policy':cors?'cross-origin':'same-origin','X-Pica-Cache':state});
+  if(cache?.enabled&&request.method==='GET'){
+    try{const hit=await cache.get(cacheKey);if(hit)return new Response(hit.data,{headers:cachedHeaders(hit.meta?.contentType||'image/jpeg','hit')});}catch{}
+  }
   const abort=new AbortController(),cancelled=()=>abort.abort();
   if(request.signal.aborted)abort.abort();request.signal.addEventListener('abort',cancelled,{once:true});
   const timer=setTimeout(()=>abort.abort(),timeoutMs);timer.unref?.();
@@ -59,15 +66,23 @@ export async function forwardImage(request,{fetchImpl=globalThis.fetch,timeoutMs
     const length=response.headers.get('content-length');
     if(length!==null&&(!/^\d+$/.test(length)||Number(length)>MAX_BYTES))return reject(502,'image_too_large');
     const headers=new Headers({...(cors?CORS:{}),'Content-Type':type,'Cache-Control':(cors?'public':'private')+', max-age=86400',
-      'X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':cors?'cross-origin':'same-origin'});
+      'X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':cors?'cross-origin':'same-origin',
+      'X-Pica-Cache':cache?.enabled?'miss':'off'});
     if(request.method==='HEAD'){await response.body?.cancel();clean();if(length!==null)headers.set('Content-Length',length);return new Response(null,{headers});}
     if(!response.body){clean();return fail(502,'image_empty');}
     const reader=response.body.getReader();let size=0;
+    // Keep a copy only while it is still small enough to be worth a disk write.
+    const CHUNK_CACHE_LIMIT=8*1024*1024;const kept=cache?.enabled?[]:null;
     const stream=new ReadableStream({
       async pull(controller){try{
         const {done,value}=await reader.read();
-        if(done){clean();controller.close();return;}
+        if(done){
+          clean();controller.close();
+          if(kept?.length)void cache.put(cacheKey,Buffer.concat(kept),{ttlMs:cache.imageTtlMs,contentType:type,kind:'image'}).catch(()=>{});
+          return;
+        }
         size+=value.byteLength;if(size>MAX_BYTES){abort.abort();clean();await reader.cancel();controller.error(new Error('image_too_large'));return;}
+        if(kept){if(size<=CHUNK_CACHE_LIMIT)kept.push(Buffer.from(value));else kept.length=0;}
         controller.enqueue(value);
       }catch{clean();controller.error(new Error('image_stream_failed'));}},
       async cancel(reason){abort.abort();clean();await reader.cancel(reason);},

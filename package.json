@@ -1,6 +1,6 @@
 {
   "name": "pica-tavern-server-relay",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "main": "index.mjs",
@@ -10,5 +10,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/ssrf8/sillytavern-pica-backend.git"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build:reader": "node tools/patch-reader.mjs --input app.mjs --out dist/app.mjs --version 1.0.2 && node tools/build-reader-release.mjs --script script.json --app dist/app.mjs --out dist --version 1.0.2"
   }
 }

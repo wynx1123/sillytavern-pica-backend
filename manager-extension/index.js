@@ -28,6 +28,29 @@ async function updateBackend(){
   try{const data=await backendRequest(true);backendStatus(data.restartRequired?'后端文件已更新，请手动重启酒馆后使用。':`后端 ${data.version} 已是最新版本。`);}
   catch(error){backendStatus(error.message);}
 }
+const cacheMessages={backend_admin_required:'只有酒馆管理员可以管理缓存。',cache_unavailable:'缓存当前不可用，请查看酒馆日志。',cache_config_write_failed:'缓存设置未能保存，请检查插件目录权限。',cache_config_invalid:'缓存设置有误，请重试。',cache_clear_failed:'缓存清空失败，请稍后再试。'};
+function cacheStatus(text){if(panel)panel.querySelector('[data-cache-status]').textContent=text;}
+function formatBytes(value){const n=Number(value)||0;if(n<1024)return n+' B';const units=['KB','MB','GB'];let v=n/1024,i=0;while(v>=1024&&i<units.length-1){v/=1024;i++;}return v.toFixed(v>=10?0:1)+' '+units[i];}
+async function cacheRequest(action,body){
+  const c=new AbortController();controllers.add(c);const timer=setTimeout(()=>c.abort(),20000);
+  try{
+    const r=await fetch('/api/plugins/pica-relay/cache/'+action,{method:body?'POST':'GET',credentials:'same-origin',redirect:'error',cache:'no-store',headers:{...context()?.getRequestHeaders?.(),'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:c.signal});
+    let data={};try{data=await r.json();}catch{}
+    if(!r.ok)throw Error(cacheMessages[data.error]||'缓存操作未完成，请稍后再试。');
+    return data;
+  }catch(error){if(error.name==='AbortError')throw Error('缓存操作超时，请稍后再试。');throw error;}
+  finally{clearTimeout(timer);controllers.delete(c);}
+}
+function renderCache(data){
+  if(!data)return;
+  const config=data.config||{};
+  const toggle=panel?.querySelector('[data-cache-enabled]');
+  if(toggle)toggle.checked=config.enabled!==false;
+  cacheStatus(`已缓存 ${formatBytes(data.bytes)} / ${formatBytes(data.maxBytes)} · ${data.entries||0} 条 · 命中 ${((Number(data.hitRate)||0)*100).toFixed(1)}%${(data.evictions||0)?` · 已淘汰 ${data.evictions} 条`:''}`);
+}
+async function checkCache(){cacheStatus('正在读取缓存……');try{renderCache(await cacheRequest('status'));}catch(error){cacheStatus(error.message);}}
+async function clearCache(){cacheStatus('正在清空缓存……');try{const data=await cacheRequest('clear',{});renderCache(data);cacheStatus('缓存已清空。'+`当前 ${data.entries||0} 条。`);}catch(error){cacheStatus(error.message);}}
+async function toggleCache(enabled){cacheStatus(enabled?'正在启用缓存……':'正在停用缓存……');try{const data=await cacheRequest('config',{enabled});renderCache(data);cacheStatus(enabled?'缓存已启用。':'缓存已停用，之后直接访问上游。');}catch(error){renderCache(await cacheRequest('status').catch(()=>null));cacheStatus(error.message);}}
 async function bytes(relative,limit){
   const c=new AbortController();controllers.add(c);const timer=setTimeout(()=>c.abort(),20000);
   try{const r=await fetch(BASE+relative,{credentials:'same-origin',redirect:'error',headers:context()?.getRequestHeaders?.()||{},signal:c.signal,cache:'no-store'});if(!r.ok){if(r.status===503&&(await r.json().catch(()=>({}))).error==='reader_not_published')throw Error('前端尚未发布，待作者发布后再试。已有前端可继续使用。');throw Error('酒馆后端暂不可用，请确认插件已启用并重启酒馆。');}const chunks=[];let size=0;for await(const chunk of r.body){size+=chunk.length;if(size>limit)throw Error('下载文件超过大小限制。');chunks.push(chunk);}const out=new Uint8Array(size);let n=0;for(const chunk of chunks){out.set(chunk,n);n+=chunk.length;}return out;}finally{clearTimeout(timer);controllers.delete(c);}
@@ -68,12 +91,15 @@ export function init(){
   const mount=()=>{
     if(!alive||panel)return;const parent=document.getElementById('extensions_settings2')||document.getElementById('extensions_settings');if(!parent)return;
     panel=document.createElement('div');panel.id='pica-distribution-settings';
-    panel.innerHTML='<div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header" role="button" tabindex="0" aria-expanded="false" aria-controls="pica-distribution-content"><b>哔咔后端</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" aria-hidden="true"></div></div><div id="pica-distribution-content" class="inline-drawer-content"><div class="pica-distribution-section"><b>后端更新</b><p data-backend-status role="status" aria-live="polite">从 GitHub 更新，完成后需手动重启酒馆。</p><div class="pica-distribution-actions"><button class="menu_button" type="button" data-backend-check>查看状态</button><button class="menu_button" type="button" data-backend-update><i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i>更新后端</button></div></div><div class="pica-distribution-section"><b>前端入口</b><p data-status role="status" aria-live="polite">需要已启用的酒馆助手。</p><div class="pica-distribution-actions"><button class="menu_button" type="button" data-check>检查前端版本</button><button class="menu_button" type="button" data-install disabled>安装并启用前端</button><button class="menu_button" type="button" data-undo disabled>撤销本页入口更新</button></div></div></div></div>';
+    panel.innerHTML='<div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header" role="button" tabindex="0" aria-expanded="false" aria-controls="pica-distribution-content"><b>哔咔后端</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" aria-hidden="true"></div></div><div id="pica-distribution-content" class="inline-drawer-content"><div class="pica-distribution-section"><b>后端更新</b><p data-backend-status role="status" aria-live="polite">从 GitHub 更新，完成后需手动重启酒馆。</p><div class="pica-distribution-actions"><button class="menu_button" type="button" data-backend-check>查看状态</button><button class="menu_button" type="button" data-backend-update><i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i>更新后端</button></div></div><div class="pica-distribution-section"><b>前端入口</b><p data-status role="status" aria-live="polite">需要已启用的酒馆助手。</p><div class="pica-distribution-actions"><button class="menu_button" type="button" data-check>检查前端版本</button><button class="menu_button" type="button" data-install disabled>安装并启用前端</button><button class="menu_button" type="button" data-undo disabled>撤销本页入口更新</button></div></div><div class="pica-distribution-section"><b>缓存</b><p data-cache-status role="status" aria-live="polite">图片与接口响应缓存在酒馆本地，重启后仍有效。</p><label class="pica-cache-toggle"><input type="checkbox" role="switch" data-cache-enabled> <span>启用缓存</span></label><div class="pica-distribution-actions"><button class="menu_button" type="button" data-cache-check>查看缓存</button><button class="menu_button" type="button" data-cache-clear>清空缓存</button></div></div></div></div>';
     const header=panel.querySelector('.inline-drawer-header');
     header.onclick=()=>header.setAttribute('aria-expanded',String(header.getAttribute('aria-expanded')!=='true'));
     header.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();header.click();}};
     parent.append(panel);panel.querySelector('[data-check]').onclick=()=>act(check);panel.querySelector('[data-install]').onclick=()=>act(install);panel.querySelector('[data-undo]').onclick=()=>act(undo);
     panel.querySelector('[data-backend-check]').onclick=()=>act(checkBackend);panel.querySelector('[data-backend-update]').onclick=()=>act(updateBackend);
+    panel.querySelector('[data-cache-check]').onclick=()=>act(checkCache);panel.querySelector('[data-cache-clear]').onclick=()=>act(clearCache);
+    panel.querySelector('[data-cache-enabled]').onchange=event=>act(()=>toggleCache(event.target.checked));
+    act(async()=>{try{renderCache(await cacheRequest('status'));}catch(error){cacheStatus(error.message);}});
   };
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
 }

@@ -3,4 +3,6 @@
 #pica-distribution-settings p{margin:8px 0;font-size:calc(var(--mainFontSize,16px)*.85);opacity:.8;overflow-wrap:anywhere}
 #pica-distribution-settings .pica-distribution-actions{display:flex;flex-wrap:wrap;gap:5px}
 #pica-distribution-settings .menu_button{width:auto;margin:0;white-space:normal}
+#pica-distribution-settings .pica-cache-toggle{display:flex;align-items:center;gap:8px;margin:2px 0 10px;font-size:calc(var(--mainFontSize,16px)*.9)}
+#pica-distribution-settings .pica-cache-toggle input{width:18px;height:18px;min-height:18px;margin:0;accent-color:var(--SmartThemeQuoteColor)}
 #pica-distribution-settings [role="button"]:focus-visible{outline:2px solid var(--SmartThemeQuoteColor);outline-offset:2px}

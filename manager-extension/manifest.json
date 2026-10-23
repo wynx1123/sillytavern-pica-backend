@@ -4,7 +4,7 @@
   "js":"index.js",
   "css":"style.css",
   "author":"ssrf",
-  "version":"1.0.0",
+  "version":"1.1.0",
   "homePage":"https://github.com/ssrf8/sillytavern-pica-backend",
   "minimum_client_version":"1.18.0",
   "auto_update":false,
