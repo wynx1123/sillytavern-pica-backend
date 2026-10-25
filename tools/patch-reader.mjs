@@ -15,6 +15,8 @@
  *  6. in-memory LRU of image blobs so re-reading a page never re-downloads it.
  *  7. per-page pinch zoom (up to 5x, drag to pan, double tap for 2.5x) - the
  *     reader pinned touch-action to pan-y so small text could not be magnified.
+ *  8. a second source line ("再看漫画") served by this backend's Pica-compatible
+ *     facade under /sources/zai/ - one extra preset, no other reader changes.
  *
  * Usage:
  *   node tools/patch-reader.mjs --input app.mjs --out dist/app.mjs --version 1.0.2
@@ -285,6 +287,33 @@ patch('seek-input',
 patch('reader-eager',
   "image.alt='第 '+row.number+' 张';image.loading='lazy';image.decoding='async';image.referrerPolicy='no-referrer';",
   "image.alt='第 '+row.number+' 张';image.loading='eager';image.decoding='async';image.referrerPolicy='no-referrer';");
+
+/* ------------------------------------------------------- extra source line -- */
+patch('source-preset',
+  '  const routeProfile={"schemaVersion": 2, "trustedOverflowOrigins": ["https://pica.ssrfhlydxl.ccwu.cc"], "presets": [{"id": "line-a", "label": "线路A", "baseUrl": "https://chatgptdxl.ccwu.cc/pica-relay", "enabled": true, "authMode": "public"}]};',
+  `  const routeProfile={"schemaVersion": 2, "trustedOverflowOrigins": ["https://pica.ssrfhlydxl.ccwu.cc"], "presets": [{"id": "line-a", "label": "线路A", "baseUrl": "https://chatgptdxl.ccwu.cc/pica-relay", "enabled": true, "authMode": "public"}, {"id": "line-zai", "label": "再看漫画", "baseUrl": ((self.location&&self.location.origin)||"")+"/api/plugins/pica-relay/sources/zai", "enabled": (self.location&&self.location.protocol)==="https:", "authMode": "public"}]};`);
+
+patch('source-builtin',
+  `  const builtin=presets.filter(r=>r.id==='line-a').slice(0,1).map(r=>{
+    let base='';try{base=baseUrl(r.baseUrl);}catch{}
+    return {id:'line-a',label:'线路A',baseUrl:base,kind:'public',enabled:r.enabled===true&&!!base};
+  });`,
+  `  const builtin=presets.filter(r=>r.id==='line-a'||r.id==='line-zai').map(r=>{
+    let base='';try{base=baseUrl(r.baseUrl);}catch{}
+    return {id:r.id,label:r.label||r.id,baseUrl:base,kind:'public',enabled:r.enabled===true&&!!base};
+  });`);
+
+patch('source-config-mode',
+  "const result={version:2,mode:value.mode==='host'?'host':'line-a',hostUpstream:value.hostUpstream==='native2'?'native2':'system'};",
+  "const result={version:2,mode:value.mode==='host'?'host':value.mode==='line-zai'?'line-zai':'line-a',hostUpstream:value.hostUpstream==='native2'?'native2':'system'};");
+
+patch('source-configure',
+  "if(!['line-a','host'].includes(mode))throw error('仅支持线路A或酒馆后端。','config');",
+  "if(!['line-a','line-zai','host'].includes(mode))throw error('仅支持线路A、再看漫画或酒馆后端。','config');");
+
+patch('source-select-option',
+  '<option value=\\"line-a\\">线路A</option><option value=\\"host\\">酒馆后端</option>',
+  '<option value=\\"line-a\\">线路A</option><option value=\\"line-zai\\">再看漫画</option><option value=\\"host\\">酒馆后端</option>');
 
 export function patchReader(source, {instrument = false, version = '1.0.2'} = {}) {
   let out = source;

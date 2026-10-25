@@ -9,9 +9,11 @@ import {createNativeProfiles} from './native-route.mjs';
 import {createBackendUpdater} from './updater.mjs';
 import {installBundledManager} from './manager-install.mjs';
 import {createDiskCache} from './cache.mjs';
+import {createZaimanhua} from './sources/zaimanhua.mjs';
+import {createSourceFacade} from './sources/facade.mjs';
 export const info={id:'pica-relay',name:'Pica Tavern Relay',description:'Fixed-upstream Pica relay using the host authentication.'};
-const active=new Set(),images=new Set();let closing=false,distribution=null,transport=null,native=null,updater=null,cache=null;
-const PLUGIN_VERSION='1.1.0';
+const active=new Set(),images=new Set();let closing=false,distribution=null,transport=null,native=null,updater=null,cache=null,sources=new Map();
+const PLUGIN_VERSION='1.2.0';
 const CACHE_CONFIG=new URL('./cache.local.json',import.meta.url);
 const DEFAULT_CACHE={enabled:true,maxBytes:512*1024*1024,imageTtlDays:7,apiTtlSeconds:180};
 function readCacheConfig(){
@@ -32,6 +34,11 @@ function saveCacheConfig(patch){
   writeFileSync(CACHE_CONFIG,JSON.stringify(next,null,2)+'\n',{mode:0o600});
   return next;
 }
+function readSourceConfig(){
+  let saved={};try{saved=JSON.parse(readFileSync(new URL('./sources.local.json',import.meta.url),'utf8'));}catch(e){if(e.code!=='ENOENT')console.warn('[pica-relay:source] 配置读取失败，使用默认值。');}
+  const zai=saved&&typeof saved.zaimanhua==='object'&&!Array.isArray(saved.zaimanhua)?saved.zaimanhua:{};
+  return {zai:{username:process.env.ZAIMANHUA_USERNAME||zai.username||'',password:process.env.ZAIMANHUA_PASSWORD||zai.password||''}};
+}
 const adminOnly=(req,res)=>{if(req.user?.profile?.admin!==true){res.status(403).json({error:'backend_admin_required'});return false;}return true;};
 // The host supplies its authenticated router. Never mount a second public server.
 export async function init(router,{nativeOptions={},updateOptions={}}={}){
@@ -44,6 +51,13 @@ export async function init(router,{nativeOptions={},updateOptions={}}={}){
   let network={};try{network=JSON.parse(readFileSync(new URL('./network.local.json',import.meta.url),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
   transport=network.httpsProxy?createProxyTransport(network.httpsProxy):null;
   try{native=await createNativeProfiles({stateFile:fileURLToPath(new URL('./native-routes.local.json',import.meta.url)),proxyUrl:network.httpsProxy||'',...nativeOptions});}catch{native=null;}
+  // Extra sources behind a Pica-compatible facade; the reader reaches them as a
+  // separate "线路" preset, so no other reader change is needed.
+  const sourceFetch=transport?transport.fetch:globalThis.fetch;
+  const sourceConfig=readSourceConfig();
+  sources=new Map();
+  try{sources.set('zai',createSourceFacade({adapter:createZaimanhua({fetchImpl:sourceFetch,cache,credentials:sourceConfig.zai,log:console.warn}),fetchImpl:sourceFetch,cache,upstreamMode:transport?'configured-proxy':'direct',log:console.warn}));}
+  catch(error){console.warn('[pica-relay:source] 再看漫画源初始化失败：'+(error?.message||error));}
   distribution=createDistributor({profile,cacheDir:fileURLToPath(new URL('./cache/',import.meta.url)),fetchImpl:transport?transport.fetch:globalThis.fetch});
   updater=createBackendUpdater({...updateOptions,version:PLUGIN_VERSION});
   router.get('/maintenance/status',async(req,res)=>{
@@ -97,6 +111,13 @@ export async function init(router,{nativeOptions={},updateOptions={}}={}){
     try{await cache.clear();res.json({ok:true,...cache.stats()});}
     catch{res.status(503).json({error:'cache_clear_failed'});}
   });
+  router.get('/sources/status',async(req,res)=>{
+    res.set('Cache-Control','no-store');
+    if(!adminOnly(req,res))return;
+    const config=readSourceConfig();
+    res.json({sources:[...sources.values()].map(source=>source.status()),credentials:{zai:{configured:!!config.zai.username}},cache:{version:1,enabled:cache?.enabled===true}});
+  });
+  router.get('/reader/channels/stable.json',async(_req,res)=>{try{const data=await distribution.channel();res.set({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).send(data);}catch(error){res.status(503).set('Cache-Control','no-store').json({error:error.message==='reader_not_published'?'reader_not_published':'reader_release_unavailable'});}});
   router.get('/reader/releases/:version/:file',async(req,res)=>{try{const data=await distribution.artifact(req.params.version,req.params.file);res.set({'Content-Type':req.params.file==='app.mjs'?'text/javascript; charset=utf-8':'application/json; charset=utf-8','Cache-Control':'private, max-age=31536000, immutable','X-Content-Type-Options':'nosniff'}).send(data);}catch{res.status(404).json({error:'reader_artifact_unavailable'});}});
   router.post('/native-route/select',async(req,res)=>{
     const abort=new AbortController(),cancel=()=>{if(!res.writableEnded)abort.abort();};res.once('close',cancel);active.add(abort);
@@ -116,6 +137,13 @@ export async function init(router,{nativeOptions={},updateOptions={}}={}){
     const abort=new AbortController(),cancel=()=>{if(!res.writableEnded)abort.abort();};
     let targetPath=req.url,fetchImpl=transport?transport.fetch:globalThis.fetch;
     const nativeMatch=/^\/native\/([a-f0-9]{32})(\/(?:api|image)\/.*)$/.exec(targetPath);
+    let source=null;
+    if(targetPath.startsWith('/sources/')){
+      const sourceMatch=/^\/sources\/([a-z0-9-]{1,24})(\/.*)?$/.exec(targetPath);
+      source=sourceMatch?sources.get(sourceMatch[1]):null;
+      if(!source)return res.status(404).set('Cache-Control','no-store').json({error:'source_not_found'});
+      targetPath=sourceMatch[2]||'/';
+    }
     if(targetPath.startsWith('/native/')){
       const selected=nativeMatch&&native?.get(nativeMatch[1]);
       if(!selected)return res.status(410).set('Cache-Control','no-store').json({error:'native_profile_missing'});
@@ -137,7 +165,8 @@ export async function init(router,{nativeOptions={},updateOptions={}}={}){
         else{
           headers.delete('content-length');
           const input=new Request(new URL(targetPath,'http://pica-plugin.invalid'),{method:req.method,headers,body,signal:abort.signal});
-          result=isImage?await forwardImage(input,{cors:false,fetchImpl,cache}):
+          result=source?await source.handle(input):
+            isImage?await forwardImage(input,{cors:false,fetchImpl,cache}):
             await forwardPica(input,{authorizationHeader:'x-pica-authorization',fetchImpl,cache});
         }
       }
