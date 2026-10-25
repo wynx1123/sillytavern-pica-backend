@@ -13,6 +13,8 @@
  *     pointer/wheel event; it now releases after the user scrolls away.
  *  5. reader pages use loading="eager" (the loader already controls when src is set).
  *  6. in-memory LRU of image blobs so re-reading a page never re-downloads it.
+ *  7. per-page pinch zoom (up to 5x, drag to pan, double tap for 2.5x) - the
+ *     reader pinned touch-action to pan-y so small text could not be magnified.
  *
  * Usage:
  *   node tools/patch-reader.mjs --input app.mjs --out dist/app.mjs --version 1.0.2
@@ -112,6 +114,130 @@ patch('cache-store',
   `      const blob=new host.Blob(chunks,{type});blobPut(job.target,blob);
       job.objectUrl=host.URL.createObjectURL(blob);job.state='loaded';imageState(job,'decoding');
       attachLoaded(job);`);
+
+/* ------------------------------------------------------------- page zoom -- */
+patch('zoom-var',
+  'let episodeDocs=[],readingControls=null,pageStream=null,socialControls=null,generationControls=null,readingReady=false,panelScroll=0;',
+  'let episodeDocs=[],readingControls=null,pageStream=null,socialControls=null,generationControls=null,readingReady=false,pageZoom=null,panelScroll=0;');
+
+patch('zoom-factory',
+  '  function renderPageRow(row){',
+  `  /* Long-strip pages are often typeset small and #scroll pins touch-action to
+     pan-y, so the browser pinch is unavailable inside the reader. This adds a
+     per-page gesture: pinch to zoom up to 5x, drag to pan while zoomed, double
+     tap to jump to 2.5x at the tapped point, pinch-in or double tap to reset. */
+  function createPicaPageZoom({host,root,maxScale=5,doubleTap=2.5}={}){
+    const style=host.document.createElement('style');
+    style.textContent='#reader .page-slot[data-pica-zoom="true"]{overflow:hidden;z-index:4}#reader .page-slot[data-pica-zoom="true"] img.reader-image{will-change:transform}';
+    root.prepend(style);
+    const clock=()=>(host.performance?.now?.()||Date.now());
+    let hinted=false;
+    return {
+      attach(slot,image){
+        if(slot.dataset.picaZoomBound)return;slot.dataset.picaZoomBound='true';
+        let scale=1,x=0,y=0,origin={x:0,y:0},pointers=new Map(),downs=new Map(),start=null,downAt=0,moved=0,lastTap=0;
+        const size=()=>{const r=slot.getBoundingClientRect();return {w:r.width||1,h:r.height||1};};
+        function clamp(){
+          if(scale<=1){scale=1;x=0;y=0;return;}
+          const {w,h}=size(),grow=scale-1;
+          x=Math.max(-grow*(w-origin.x),Math.min(grow*origin.x,x));
+          y=Math.max(-grow*(h-origin.y),Math.min(grow*origin.y,y));
+        }
+        function apply(){
+          image.style.transform=scale>1?('translate('+Math.round(x)+'px,'+Math.round(y)+'px) scale('+scale.toFixed(3)+')'):'';
+          image.style.touchAction=scale>1?'none':'';
+          const flag=String(scale>1);
+          if(slot.dataset.picaZoom!==flag)slot.dataset.picaZoom=flag;
+        }
+        function set(next,at){
+          const r=slot.getBoundingClientRect(),{w,h}=size();
+          origin={x:Math.max(0,Math.min(w,at?at.x-r.left:w/2)),y:Math.max(0,Math.min(h,at?at.y-r.top:h/2))};
+          scale=Math.max(1,Math.min(maxScale,next));x=0;y=0;clamp();apply();
+        }
+        const point=e=>({x:e.clientX,y:e.clientY});
+        const rebase=()=>{
+          const first=[...pointers.values()][0];
+          if(first)start={scale,x,y,p:first};
+        };
+        slot.addEventListener('pointerdown',e=>{
+          if(e.target.closest?.('button'))return;
+          if(image.dataset.picaImageState!=='loaded')return;
+          pointers.set(e.pointerId,point(e));downs.set(e.pointerId,point(e));
+          moved=0;downAt=clock();
+          try{slot.setPointerCapture(e.pointerId);}catch{}
+          if(pointers.size===1){start={scale,x,y,p:point(e)};}
+          else if(pointers.size===2){
+            const [p1,p2]=[...pointers.values()],r=slot.getBoundingClientRect();
+            origin={x:Math.max(0,Math.min(r.width,(p1.x+p2.x)/2-r.left)),y:Math.max(0,Math.min(r.height,(p1.y+p2.y)/2-r.top))};
+            start={scale,x,y,d:Math.max(1,Math.hypot(p1.x-p2.x,p1.y-p2.y)),mid:{x:(p1.x+p2.x)/2,y:(p1.y+p2.y)/2}};
+          }else{start=null;scale=1;x=0;y=0;apply();}
+        });
+        slot.addEventListener('pointermove',e=>{
+          if(!pointers.has(e.pointerId))return;
+          const down=downs.get(e.pointerId)||point(e),now=point(e);
+          pointers.set(e.pointerId,now);
+          moved=Math.max(moved,Math.hypot(now.x-down.x,now.y-down.y));
+          if(pointers.size===2&&start?.d){
+            const [p1,p2]=[...pointers.values()];
+            const d=Math.max(1,Math.hypot(p1.x-p2.x,p1.y-p2.y));
+            scale=Math.max(1,Math.min(maxScale,start.scale*d/start.d));
+            const mid={x:(p1.x+p2.x)/2,y:(p1.y+p2.y)/2};
+            x=start.x+(mid.x-start.mid.x);y=start.y+(mid.y-start.mid.y);
+            clamp();apply();
+          }else if(pointers.size===1&&scale>1&&start?.p){
+            x=start.x+(now.x-start.p.x);y=start.y+(now.y-start.p.y);
+            clamp();apply();
+          }
+        });
+        const finish=e=>{
+          pointers.delete(e.pointerId);downs.delete(e.pointerId);
+          if(pointers.size===1)rebase();
+          if(pointers.size===0&&moved<10&&clock()-downAt<350){
+            const now=clock();
+            if(now-lastTap<320){
+              if(scale>1){scale=1;x=0;y=0;apply();}
+              else set(doubleTap,point(e));
+              lastTap=0;
+            }else lastTap=now;
+          }
+          if(pointers.size===0)start=null;
+          if(scale>1&&!hinted){hinted=true;notice('已放大：单指拖动移动，双指捏合或双击还原。');}
+        };
+        slot.addEventListener('pointerup',finish);
+        slot.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);downs.delete(e.pointerId);if(pointers.size===1)rebase();if(!pointers.size)start=null;});
+        slot.addEventListener('lostpointercapture',e=>{pointers.delete(e.pointerId);downs.delete(e.pointerId);if(pointers.size===1)rebase();if(!pointers.size)start=null;});
+      },
+    };
+  }
+  function renderPageRow(row){`);
+
+patch('zoom-attach',
+  'slot.append(image,placeholder,retry);return slot;',
+  'slot.append(image,placeholder,retry);pageZoom?.attach(slot,image);return slot;');
+
+patch('zoom-create',
+  '  readingControls=createPicaReadingControls();',
+  `  readingControls=createPicaReadingControls();
+  pageZoom=createPicaPageZoom({host,root:view});`);
+
+/* A pinch used to fire the tap-to-toggle-chrome handler, because it only ever
+   tracked the newest pointer. Count active pointers instead: the first finger
+   still arms the tap, any second finger cancels it. */
+patch('zoom-tap-guard',
+  `  listen($('pages'),'pointerdown',event=>{press={id:event.pointerId,x:event.clientX,y:event.clientY};});
+  listen($('pages'),'pointerup',event=>{
+    if(press&&event.pointerId===press.id&&Math.hypot(event.clientX-press.x,event.clientY-press.y)<8&&!event.target.closest('button'))setChrome(!shown);
+    press=null;
+  });
+  listen($('pages'),'pointercancel',()=>{press=null;});`,
+  `  let pagePointers=0;
+  listen($('pages'),'pointerdown',event=>{pagePointers++;if(pagePointers>1)press=null;else press={id:event.pointerId,x:event.clientX,y:event.clientY};});
+  listen($('pages'),'pointerup',event=>{
+    pagePointers=Math.max(0,pagePointers-1);
+    if(press&&event.pointerId===press.id&&Math.hypot(event.clientX-press.x,event.clientY-press.y)<8&&!event.target.closest('button'))setChrome(!shown);
+    press=null;
+  });
+  listen($('pages'),'pointercancel',()=>{press=null;pagePointers=Math.max(0,pagePointers-1);});`);
 
 /* ------------------------------------------------------- reading controls -- */
 patch('progress-watchdog',

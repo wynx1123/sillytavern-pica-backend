@@ -3,7 +3,7 @@
 酒馆（SillyTavern）的哔咔中继后端。本分支在原版基础上做了两件事：
 
 1. **本地磁盘缓存**：图片与 GET 接口响应缓存在酒馆机器上，命中后不再访问上游；面板可查看命中率、调整上限、一键清空。
-2. **修复阅读器「看三页就要收起再打开」**：重新打包 `/dist` 下的阅读器前端（`1.0.2`），解决自动续载/图片预取停住的问题，并加入阅读器内存图片缓存。
+2. **修复阅读器「看三页就要收起再打开」 + 新增捏合放大**：重新打包 `/dist` 下的阅读器前端（`1.0.3`），解决自动续载/图片预取停住的问题，加入阅读器内存图片缓存，并支持**双指捏合放大（最高 5 倍）/ 双击 2.5 倍 / 放大后单指拖动**——小字漫画终于能放大看了。
 
 > 前端本体不在本仓库：它由作者以签名包形式发布在 R2。`dist/` 里的修复版是用 `tools/` 下的脚本对官方 `1.0.1` 打补丁后重建的，可复现。
 
@@ -73,17 +73,17 @@ node tools/fetch-official-reader.mjs --out .official
 # 2. 打补丁
 node tools/patch-reader.mjs \
   --input .official/releases/1.0.1/app.mjs \
-  --out dist/app.mjs --version 1.0.2
+  --out dist/app.mjs --version 1.0.3
 
 # 3. 生成可导入的酒馆脚本 + 自定义更新源目录
 node tools/build-reader-release.mjs \
   --script .official/releases/1.0.1/script.json \
-  --app dist/app.mjs --out dist --version 1.0.2
+  --app dist/app.mjs --out dist --version 1.0.3
 ```
 
 产物：
 
-- `dist/pica-reader-fixed-1.0.2.json` — 在 **酒馆助手 → 脚本库 → 导入** 即可。导入前请先停用/删除原版哔咔脚本（助手里同时存在两份会拒绝安装）。
+- `dist/pica-reader-fixed-1.0.3.json` — 在 **酒馆助手 → 脚本库 → 导入** 即可。导入前请先停用/删除原版哔咔脚本（助手里同时存在两份会拒绝安装）。
 - 修复版使用独立的更新库（`tw.pica.reader.updates.v1.fix`），不会被旧版 IndexedDB 里缓存的官方前端顶掉；账号、线路、阅读记录仍共用原来的 localStorage。
 - `dist/release/` — 可选的自建更新源：把该目录放到任意 HTTPS 根地址，在阅读器「设置 → 程序更新 → 更新源」填入即可。修复版默认 **关闭官方自动更新**，避免被官方 `1.0.1` 覆盖。
 
@@ -100,4 +100,4 @@ node --test test/*.test.mjs
 ## 版本
 
 - 后端插件：`1.1.0`（`core.mjs` 协议版本 `0.5.0`）
-- 阅读器修复版：`1.0.2`（官方基线 `1.0.1`）
+- 阅读器修复版：`1.0.3`（官方基线 `1.0.1`；`1.0.3` 新增**双指捏合放大 / 双击 2.5 倍 / 放大后单指拖动**）
