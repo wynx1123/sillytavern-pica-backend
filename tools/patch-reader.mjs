@@ -291,7 +291,7 @@ patch('reader-eager',
 /* ------------------------------------------------------- extra source line -- */
 patch('source-preset',
   '  const routeProfile={"schemaVersion": 2, "trustedOverflowOrigins": ["https://pica.ssrfhlydxl.ccwu.cc"], "presets": [{"id": "line-a", "label": "线路A", "baseUrl": "https://chatgptdxl.ccwu.cc/pica-relay", "enabled": true, "authMode": "public"}]};',
-  `  const routeProfile={"schemaVersion": 2, "trustedOverflowOrigins": ["https://pica.ssrfhlydxl.ccwu.cc"], "presets": [{"id": "line-a", "label": "线路A", "baseUrl": "https://chatgptdxl.ccwu.cc/pica-relay", "enabled": true, "authMode": "public"}, {"id": "line-zai", "label": "再看漫画", "baseUrl": ((self.location&&self.location.origin)||"")+"/api/plugins/pica-relay/sources/zai", "enabled": (self.location&&self.location.protocol)==="https:", "authMode": "public"}]};`);
+  `  const routeProfile={"schemaVersion": 2, "trustedOverflowOrigins": ["https://pica.ssrfhlydxl.ccwu.cc"], "presets": [{"id": "line-a", "label": "线路A", "baseUrl": "https://chatgptdxl.ccwu.cc/pica-relay", "enabled": true, "authMode": "public"}, {"id": "line-zai", "label": "再看漫画", "baseUrl": (()=>{const ok=v=>{const t=String(v||'').trim();if(!t||t==='null')return '';try{const u=new URL(t);if(u.protocol==='file:'||u.protocol==='about:')return '';return (u.origin&&u.origin!=='null'?u.origin:(u.protocol+'//'+u.host));}catch{return '';}};try{const a=ok(self.location.origin);if(a)return a+'/api/plugins/pica-relay/sources/zai';}catch{}try{const b=ok(self.location.href);if(b)return b+'/api/plugins/pica-relay/sources/zai';}catch{}try{const c=ok(self.document.URL);if(c)return c+'/api/plugins/pica-relay/sources/zai';}catch{}try{const d=ok(self.document.referrer);if(d)return d+'/api/plugins/pica-relay/sources/zai';}catch{}return '';})(), "enabled": true, "authMode": "public"}]};`);
 
 patch('source-builtin',
   `  const builtin=presets.filter(r=>r.id==='line-a').slice(0,1).map(r=>{
@@ -328,6 +328,70 @@ patch('route-switch-reset',
     profile=null; // force the new source to re-verify the session
     run(async()=>{const saved=routeManager.configure({mode});updateCacheStatus(saved?undefined:'线路偏好未能保存。');await connectSelected();});
   };`);
+
+/* ------------------------------------------------- IPA / custom scheme -- */
+/* TT酒馆 IPA 跑在 capacitor:// 之类的自定义协议下，location.origin 可能是
+   "null"，new URL() 也拿不到 http(s) origin，于是「酒馆后端」「再看漫画」
+   都被判成不可用。这里补三层兜底，并放开同源自定义协议。 */
+patch('origin-resolve',
+  `  let storage=null;try{storage=host.localStorage;}catch{}
+  let origin='';try{origin=host.location.origin;}catch{}`,
+  `  let storage=null;try{storage=host.localStorage;}catch{}
+  // Resolve the tavern origin. IPA shells (capacitor://, app://, file://) often
+  // report "null" or a non-http scheme, so fall back through several sources.
+  function picaOrigin(){
+    const clean=value=>{const text=String(value||'').trim();if(!text||text==='null')return '';try{const u=new URL(text);if(u.protocol==='file:'||u.protocol==='about:')return '';if(u.origin&&u.origin!=='null')return u.origin;if(u.protocol&&u.host)return u.protocol+'//'+u.host;}catch{}return '';};
+    const direct=clean((()=>{try{return host.location.origin;}catch{return '';}})());
+    if(direct)return direct;
+    const loc=clean((()=>{try{return host.location.href;}catch{return '';}})());
+    if(loc)return loc;
+    const docUrl=clean((()=>{try{return host.document.URL;}catch{return '';}})());
+    if(docUrl)return docUrl;
+    const selfUrl=clean((()=>{try{return self.document.URL;}catch{return '';}})());
+    if(selfUrl)return selfUrl;
+    const ref=clean((()=>{try{return self.document.referrer;}catch{return '';}})());
+    if(ref)return ref;
+    return '';
+  }
+  let origin=picaOrigin();`);
+
+patch('host-route-scheme',
+  `  let hostRoute=null;
+  try{const origin=new URL(hostOrigin);if(/^https?:$/.test(origin.protocol)&&origin.origin===hostOrigin)hostRoute={id:'host',label:'酒馆后端',baseUrl:origin.origin+'/api/plugins/pica-relay',kind:'host',enabled:true};}catch{}`,
+  `  let hostRoute=null;
+  // Accept https, http and same-origin custom schemes (capacitor://, app://).
+  try{const u=new URL(hostOrigin);const scheme=u.protocol;const hostPart=u.host;const okScheme=scheme==='https:'||scheme==='http:'||(hostPart&&hostOrigin.indexOf(scheme+'//'+hostPart)===0);if(okScheme&&hostPart)hostRoute={id:'host',label:'酒馆后端',baseUrl:hostOrigin+'/api/plugins/pica-relay',kind:'host',enabled:true};}catch{}`);
+
+patch('base-url-scheme',
+  `  function baseUrl(value){
+    const raw=String(value||'').trim();if(!raw||/[\\\\\\s]/.test(raw)||/%(?:2e|2f|5c)/i.test(raw)||/\\/\\.{1,2}(?:\\/|$)/.test(raw))throw error('请填写完整的 HTTPS 转发地址。','config');
+    const url=new URL(raw);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw error('请填写完整的 HTTPS 转发地址。','config');
+    return url.origin+url.pathname.replace(/\\/+$/,'');
+  }`,
+  `  function baseUrl(value){
+    const raw=String(value||'').trim();if(!raw||/[\\\\\\s]/.test(raw)||/%(?:2e|2f|5c)/i.test(raw)||/\\/\\.{1,2}(?:\\/|$)/.test(raw))throw error('请填写完整的转发地址。','config');
+    const url=new URL(raw);
+    if(url.username||url.password||url.search||url.hash)throw error('请填写完整的转发地址。','config');
+    const same=!!hostOrigin&&((url.origin&&url.origin!=='null'&&url.origin===hostOrigin)||(url.protocol+'//'+url.host)===hostOrigin);
+    const local=['127.0.0.1','localhost','[::1]'].includes(url.hostname);
+    const special=url.protocol==='https:'||url.protocol==='http:';
+    // https always, http only same-origin/local, custom schemes only same-origin.
+    if(!(url.protocol==='https:'||(url.protocol==='http:'&&(same||local))||(same&&!special)))throw error('请填写完整的 HTTPS 转发地址。','config');
+    return (url.origin&&url.origin!=='null'?url.origin:(url.protocol+'//'+url.host))+url.pathname.replace(/\\/+$/,'');
+  }`);
+
+patch('route-diag',
+  `      for(const option of $('route-selection').options){const route=state.routes.find(r=>r.id===option.value);option.disabled=!route?.enabled;option.textContent=(route?.label||(option.value==='host'?'酒馆后端':'线路A'))+(route?.enabled?'':' · 不可用');}
+    }`,
+  `      for(const option of $('route-selection').options){const route=state.routes.find(r=>r.id===option.value);option.disabled=!route?.enabled;option.textContent=(route?.label||(option.value==='host'?'酒馆后端':'线路A'))+(route?.enabled?'':' · 不可用');}
+      if(state&&!state.routes.some(r=>r.id==='host')){
+        let diag=$('route-diag');
+        if(!diag){diag=document.createElement('p');diag.id='route-diag';diag.className='hint';diag.style.cssText='font-size:11px;opacity:.65;word-break:break-all;margin:6px 0 0';const anchor=$('route-selection').closest('.setting-row')||$('route-selection').parentElement;if(anchor&&anchor.after)anchor.after(diag);}
+        let loc='';try{loc=host.location.href;}catch{}
+        let url='';try{url=host.document.URL;}catch{}
+        diag.hidden=false;diag.textContent='诊断：地址='+String(loc||url).slice(0,120);
+      }else{const diag=$('route-diag');if(diag)diag.hidden=true;}
+    }`);
 
 export function patchReader(source, {instrument = false, version = '1.0.2'} = {}) {
   let out = source;
