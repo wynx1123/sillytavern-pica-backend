@@ -315,6 +315,20 @@ patch('source-select-option',
   '<option value=\\"line-a\\">线路A</option><option value=\\"host\\">酒馆后端</option>',
   '<option value=\\"line-a\\">线路A</option><option value=\\"line-zai\\">再看漫画</option><option value=\\"host\\">酒馆后端</option>');
 
+/* Switching between sources must drop the previous source's profile, otherwise
+   a guest token from one facade is silently trusted by the next one and every
+   request fails with an opaque upstream error. */
+patch('route-switch-reset',
+  `  $('route-selection').onchange=()=>{
+    const mode=$('route-selection').value;
+    run(async()=>{const saved=routeManager.configure({mode});updateCacheStatus(saved?undefined:'线路偏好未能保存。');await connectSelected();});
+  };`,
+  `  $('route-selection').onchange=()=>{
+    const mode=$('route-selection').value;
+    profile=null; // force the new source to re-verify the session
+    run(async()=>{const saved=routeManager.configure({mode});updateCacheStatus(saved?undefined:'线路偏好未能保存。');await connectSelected();});
+  };`);
+
 export function patchReader(source, {instrument = false, version = '1.0.2'} = {}) {
   let out = source;
   for (const {name, from, to} of PATCHES) {
